@@ -1,4 +1,4 @@
-ruleset Order {
+ruleset io.picolabs.child_order {
   meta {
     shares __testing, getOrderTitle, getOrderDescription, getProductCart, getOrder
      use module io.picolabs.wrangler alias wrangler
