@@ -14,7 +14,8 @@ ruleset io.picolabs.child_order {
     }
     
     getOrder = function() {
-      ent:Order;
+      map = {"title": ent:OrderTitle, "description":ent:OrderDescription, "order": ent:Order};
+      map;
     }
     
     getProductCart = function() {
