@@ -1,7 +1,7 @@
 ruleset io.picolabs.pizza {
   meta {
     shares __testing, nearestStore, findMenu, parseMenu, findDescriptions, getDescription, findVariants, getPrice, practice, getToppings, getStoreID, getStoreAddress, getVariants, getMenu, getDefaultToppings,
-          getProductCart, parseVariants, getParsedVariants, getOrderDescription, getOrderTitle, getChildrenOrders, getChildName, parseToppings, reverseToppings, getToppingsMap, combineItems
+          getProductCart, parseVariants, getParsedVariants, getOrderDescription, getOrderTitle, getChildrenOrders, getChildName, parseToppings, reverseToppings, getToppingsMap, combineItems, getCardType
      use module io.picolabs.wrangler alias wrangler
   }
   global {
@@ -10,13 +10,14 @@ ruleset io.picolabs.pizza {
       {"name": "findDescriptions", "args":["StoreID"]}, {"name": "getDescription"}, {"name": "findVariants", "args":["StoreID"]}, {"name": "getPrice", "args":["item"]},
       {"name": "practice"}, {"name": "getToppings", "args":["item"]}, {"name": "getMenu"}, {"name": "getVariants"}, {"name":"getDefaultToppings", "args":["item"]}, {"name": "parseVariants"},
       {"name": "getParsedVariants"}, {"name": "getProductCart"}, {"name": "getChildName", "args":["eci"]}, {"name": "parseToppings"}, {"name": "reverseToppings"}, {"name": "getToppingsMap"},
-      {"name": "combineItems"}
+      {"name": "combineItems"}, {"name": "getCardType", "args": ["number"]}
         //{ "name": "parseMenu", "args": ["menu"]}
       //, { "name": "entry", "args": [ "key" ] }
       ] , "events":
       [ { "domain": "find", "type": "store", "attrs": ["street","city","state","zipcode","firstname","lastname","phone","email","type"]}, { "domain": "store", "type": "menu"},
         {"domain": "create", "type": "order", "attrs": ["street","city","state","zipcode","first_name","last_name","phone","email","type"]},
-        {"domain": "val", "type": "order" }, {"domain": "place", "type": "order" }, {"domain": "echo", "type": "clear"}, {"domain":"add", "type":"Item"}, {"domain":"remove", "type":"Item"}
+        {"domain": "val", "type": "order" }, {"domain": "place", "type": "order" }, {"domain": "echo", "type": "clear"}, {"domain":"add", "type":"Item"}, {"domain":"remove", "type":"Item"},
+        {"domain": "add", "type": "card", "attrs": ["number","expiration","postal_code","security_code"]}
       //{ "domain": "d1", "type": "t1" }
       //, { "domain": "d2", "type": "t2", "attrs": [ "a1", "a2" ] }
       ]
@@ -125,6 +126,14 @@ ruleset io.picolabs.pizza {
       price;
     }
     
+    getCardType = function(number) {
+      type = (number.match(re#^4[0-9]{12}(?:[0-9]{3})?$#)) => "VISA" | 
+             (number.match(re#^(?:5[1-5][0-9]{2}|222[1-9]|22[3-9][0-9]|2[3-6][0-9]{2}|27[01][0-9]|2720)[0-9]{12}$#)) => "MASTERCARD" | 
+             (number.match(re#^3[47][0-9]{13}$ #)) => "AMEX" |
+             (number.match(re#^6(?:011|5[0-9]{2})[0-9]{12}$#)) => "DISCOVER" | "No Type Found";
+      type
+    }
+    
     getDefaultToppings = function(item) {
       variants = ent:Variants;
       defToppings = ((variants.values().filter(function(x){x{"Code"} == item;}).map(function(x){ array = x["Tags"]["DefaultToppings"].split(re#,#); array})));
@@ -223,11 +232,8 @@ ruleset io.picolabs.pizza {
     }
     
     getOrderDescription = function() {
-      ent:OrderDescription;
-    }
-    
-    getOrderTitle = function() {
-      ent:OrderTitle;
+      map = {"title": ent:OrderTitle, "description": ent:OrderDescription};
+      map;
     }
     
     getChildrenOrders = function() {
@@ -288,13 +294,14 @@ ruleset io.picolabs.pizza {
       email = event:attr("email").klog("email");
       location = event:attr("zipcode").klog("location");
       type = event:attr("type").klog("type");
-      Store = nearestStore(address, location,type).klog("storeID");
+      Store = nearestStore(address, location, type).klog("storeID");
       StoreID = Store["content"]["Stores"][0]["StoreID"]
       storeAddress = Store["content"]["Stores"][0]["AddressDescription"].klog("store address");
       orderEdit = event:attr("edit").defaultsTo(false);
     }
-      send_directive(StoreID);
-   always {
+      if not StoreID then
+      send_directive(Store);
+   notfired {
      ent:StoreID := StoreID;
      ent:StoreAddress := storeAddress;
      map = {"Address" : {"Street" : event:attr("street"), "City" : event:attr("city"), "Region" : event:attr("state"), "PostalCode" : event:attr("zipcode")}, "first_name" : first_name, "last_name" : last_name, "phone" : phone, "email" : email, "service_method" : type };
@@ -302,6 +309,8 @@ ruleset io.picolabs.pizza {
      ent:orderEdit := orderEdit;
      ent:Products := (ent:orderEdit == true) => ent:Products | null;
      ent:Products := (ent:Products.isnull()) => ent:Products.defaultsTo([]) | ent:Products;
+     ent:OrderTitle := (ent:orderEdit == true) => ent:OrderTitle | "";
+     ent:OrderDescription := (ent:orderEdit == true) => ent:OrderDescription | "";
      raise store event "menu"
    }
   }
@@ -365,6 +374,22 @@ ruleset io.picolabs.pizza {
     }
   }
   
+  rule addCreditCard {
+    select when add card
+    pre {
+     number = event:attr("number")
+     expiration = event:attr("expiration")
+     security_code = event:attr("security_code")
+     postal_code = event:attr("postal_code")
+     card_type = getCardType(number);
+    }
+    
+    if card_type == "No Type Found" then send_directive("No Type Found");
+    notfired {
+      ent:Payment := ent:Payment.defaultsTo([]).append({"Number": number,"CardType": card_type, "Expiration": expiration, "SecurityCode": security_code, "PostalCode": postal_code })
+    }
+  }
+  
   rule createOrder {
     select when create order
     pre {
@@ -391,7 +416,7 @@ ruleset io.picolabs.pizza {
       OrderID = "";
       OrderTaker = null;
       Partners = {};
-      Payments = [];
+      Payments = (ent:Payment == null) => [] | ent:Payment;
       Phone = ent:customer{"phone"};
       PriceOrderTime = "";
       Products = ent:Products;
@@ -429,6 +454,8 @@ ruleset io.picolabs.pizza {
     always {
       ent:Products := products;
       ent:editEci := editEci;
+      ent:OrderTitle := event:attr("title");
+      ent:OrderDescription := event:attr("description");
       raise find event "store"
         attributes {
           "street": street,
@@ -553,6 +580,7 @@ ruleset io.picolabs.pizza {
       clear ent:OrderTitle;
       clear ent:OrderDescription;
       clear ent:practice;
+      clear ent:Payment;
       ent:orderEdit := false;
     }
   }
